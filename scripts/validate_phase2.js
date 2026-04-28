@@ -94,17 +94,15 @@ var EXPECTED = {
 // HELPER FUNCTIONS (same as Phase 1)
 // ============================================================
 
-function findTestIncidents(phase) {
+function findTestIncidents(correlationDisplay) {
     var incidents = {};
     var gr = new GlideRecord('incident');
-    gr.addQuery('work_notes', 'CONTAINS', '[STRESS TEST]');
-    gr.addQuery('work_notes', 'CONTAINS', 'Phase: ' + phase);
+    gr.addQuery('correlation_display', correlationDisplay);
     gr.query();
     while (gr.next()) {
-        var wn = gr.work_notes.getJournalEntry(1);
-        var match = /Test ID:\s*(\S+)/.exec(wn);
-        if (match) {
-            incidents[match[1]] = {
+        var testId = gr.correlation_id.toString();
+        if (testId) {
+            incidents[testId] = {
                 sys_id: gr.sys_id.toString(),
                 number: gr.number.toString(),
                 category: gr.category.toString(),
@@ -134,12 +132,13 @@ function getMILink(incidentSysId) {
     var rel = new GlideRecord('task_rel_task');
     if (rel.isValid()) {
         rel.addQuery('child', incidentSysId);
-        rel.addQuery('type.name', 'CONTAINS', 'Major');
         rel.query();
-        if (rel.next()) {
+        while (rel.next()) {
             var parentTask = new GlideRecord('incident');
             if (parentTask.get(rel.parent.toString())) {
-                return { linked: true, mi_number: parentTask.number.toString(), mi_short_desc: parentTask.short_description.toString() };
+                if (parentTask.major_incident_state && parentTask.major_incident_state.toString()) {
+                    return { linked: true, mi_number: parentTask.number.toString(), mi_short_desc: parentTask.short_description.toString() };
+                }
             }
         }
     }
@@ -195,7 +194,7 @@ gs.info('║  PHASE 2 VALIDATION: Accuracy Matrix Results            ║');
 gs.info('╚══════════════════════════════════════════════════════════╝');
 gs.info('');
 
-var incidents = findTestIncidents('2 - Accuracy Matrix');
+var incidents = findTestIncidents('STRESS_TEST_P2');
 var testIds = Object.keys(EXPECTED);
 var totalPass = 0;
 var totalFail = 0;

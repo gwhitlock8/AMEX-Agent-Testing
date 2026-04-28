@@ -15,17 +15,15 @@
 // HELPER FUNCTIONS
 // ============================================================
 
-function findTestIncidents(phase) {
+function findTestIncidents(correlationDisplay) {
     var incidents = {};
     var gr = new GlideRecord('incident');
-    gr.addQuery('work_notes', 'CONTAINS', '[STRESS TEST]');
-    gr.addQuery('work_notes', 'CONTAINS', 'Phase: ' + phase);
+    gr.addQuery('correlation_display', correlationDisplay);
     gr.query();
     while (gr.next()) {
-        var wn = gr.work_notes.getJournalEntry(1);
-        var match = /Test ID:\s*(\S+)/.exec(wn);
-        if (match) {
-            incidents[match[1]] = {
+        var testId = gr.correlation_id.toString();
+        if (testId) {
+            incidents[testId] = {
                 sys_id: gr.sys_id.toString(),
                 number: gr.number.toString(),
                 short_description: gr.short_description.toString(),
@@ -52,10 +50,14 @@ function getMILink(incidentSysId) {
     var rel = new GlideRecord('task_rel_task');
     if (rel.isValid()) {
         rel.addQuery('child', incidentSysId);
-        rel.addQuery('type.name', 'CONTAINS', 'Major');
         rel.query();
-        if (rel.next()) {
-            return { linked: true };
+        while (rel.next()) {
+            var parentTask = new GlideRecord('incident');
+            if (parentTask.get(rel.parent.toString())) {
+                if (parentTask.major_incident_state && parentTask.major_incident_state.toString()) {
+                    return { linked: true };
+                }
+            }
         }
     }
     return { linked: false };
@@ -131,7 +133,7 @@ gs.info('║  PHASE 5 VALIDATION: Volume / Performance Results       ║');
 gs.info('╚══════════════════════════════════════════════════════════╝');
 gs.info('');
 
-var incidents = findTestIncidents('5 - Volume');
+var incidents = findTestIncidents('STRESS_TEST_P5');
 var incidentKeys = [];
 for (var key in incidents) {
     if (incidents.hasOwnProperty(key)) {
@@ -146,6 +148,11 @@ incidentKeys.sort(function(a, b) {
 });
 
 gs.info('Found ' + incidentKeys.length + '/30 Phase 5 test incidents');
+if (incidentKeys.length === 0) {
+    gs.info('');
+    gs.info('❌ No Phase 5 incidents found. Run phase5_volume.js first.');
+    gs.info('   Validator looks for incidents with correlation_display = "STRESS_TEST_P5"');
+}
 gs.info('');
 
 // Metrics accumulators
@@ -257,14 +264,14 @@ gs.info('║                                                              ║');
 gs.info('║  COMPLETION METRICS                                         ║');
 gs.info('║  ─────────────────                                          ║');
 gs.info('║  Incidents found:         ' + totalIncidents + '/30                            ║');
-gs.info('║  All 3 agents completed:  ' + allAgentsCompleted + '/' + totalIncidents + ' (' + Math.round((allAgentsCompleted/totalIncidents)*100) + '%)                      ║');
+gs.info('║  All 3 agents completed:  ' + allAgentsCompleted + '/' + totalIncidents + ' (' + (totalIncidents > 0 ? Math.round((allAgentsCompleted/totalIncidents)*100) : 0) + '%)                      ║');
 gs.info('║  Errors/incomplete:       ' + errors.length + '                                 ║');
 gs.info('║                                                              ║');
 gs.info('║  FIELD POPULATION RATES                                     ║');
 gs.info('║  ─────────────────────                                      ║');
-gs.info('║  Category populated:      ' + categoryPopulated + '/' + totalIncidents + ' (' + Math.round((categoryPopulated/totalIncidents)*100) + '%)                      ║');
-gs.info('║  Service populated:       ' + servicePopulated + '/' + totalIncidents + ' (' + Math.round((servicePopulated/totalIncidents)*100) + '%)                      ║');
-gs.info('║  CI populated:            ' + ciPopulated + '/' + totalIncidents + ' (' + Math.round((ciPopulated/totalIncidents)*100) + '%)                      ║');
+gs.info('║  Category populated:      ' + categoryPopulated + '/' + totalIncidents + ' (' + (totalIncidents > 0 ? Math.round((categoryPopulated/totalIncidents)*100) : 0) + '%)                      ║');
+gs.info('║  Service populated:       ' + servicePopulated + '/' + totalIncidents + ' (' + (totalIncidents > 0 ? Math.round((servicePopulated/totalIncidents)*100) : 0) + '%)                      ║');
+gs.info('║  CI populated:            ' + ciPopulated + '/' + totalIncidents + ' (' + (totalIncidents > 0 ? Math.round((ciPopulated/totalIncidents)*100) : 0) + '%)                      ║');
 gs.info('║  MI linked:               ' + miLinked + '/' + totalIncidents + '                                 ║');
 gs.info('║  Problem linked:          ' + prbLinked + '/' + totalIncidents + '                                 ║');
 gs.info('║                                                              ║');

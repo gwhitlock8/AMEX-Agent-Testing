@@ -18,17 +18,15 @@
 // HELPER FUNCTIONS
 // ============================================================
 
-function findTestIncidents(phase) {
+function findTestIncidents(correlationDisplay) {
     var incidents = {};
     var gr = new GlideRecord('incident');
-    gr.addQuery('work_notes', 'CONTAINS', '[STRESS TEST]');
-    gr.addQuery('work_notes', 'CONTAINS', 'Phase: ' + phase);
+    gr.addQuery('correlation_display', correlationDisplay);
     gr.query();
     while (gr.next()) {
-        var wn = gr.work_notes.getJournalEntry(1);
-        var match = /Test ID:\s*(\S+)/.exec(wn);
-        if (match) {
-            incidents[match[1]] = {
+        var testId = gr.correlation_id.toString();
+        if (testId) {
+            incidents[testId] = {
                 sys_id: gr.sys_id.toString(),
                 number: gr.number.toString(),
                 category: gr.category.toString(),
@@ -57,12 +55,13 @@ function getMILink(incidentSysId) {
     var rel = new GlideRecord('task_rel_task');
     if (rel.isValid()) {
         rel.addQuery('child', incidentSysId);
-        rel.addQuery('type.name', 'CONTAINS', 'Major');
         rel.query();
-        if (rel.next()) {
+        while (rel.next()) {
             var parentTask = new GlideRecord('incident');
             if (parentTask.get(rel.parent.toString())) {
-                return { linked: true, mi_number: parentTask.number.toString() };
+                if (parentTask.major_incident_state && parentTask.major_incident_state.toString()) {
+                    return { linked: true, mi_number: parentTask.number.toString() };
+                }
             }
         }
     }
@@ -110,24 +109,37 @@ function getAgentExecutions(incidentSysId) {
 }
 
 function countMILinks(incidentSysId) {
-    var count = 0;
+    var seen = {};  // deduplicate by parent sys_id
     var links = [];
+
+    // Check parent_incident field
+    var inc = new GlideRecord('incident');
+    if (inc.get(incidentSysId) && inc.parent_incident.toString()) {
+        var parentSysId = inc.parent_incident.toString();
+        if (!seen[parentSysId]) {
+            seen[parentSysId] = true;
+            links.push(inc.parent_incident.getDisplayValue());
+        }
+    }
+
+    // Check task_rel_task — only count relationships to Major Incidents
     var rel = new GlideRecord('task_rel_task');
     if (rel.isValid()) {
         rel.addQuery('child', incidentSysId);
         rel.query();
         while (rel.next()) {
-            count++;
-            links.push(rel.parent.getDisplayValue());
+            var relParentSysId = rel.parent.toString();
+            if (seen[relParentSysId]) continue;  // deduplicate
+            var parentInc = new GlideRecord('incident');
+            if (parentInc.get(relParentSysId)) {
+                if (parentInc.major_incident_state && parentInc.major_incident_state.toString()) {
+                    seen[relParentSysId] = true;
+                    links.push(parentInc.number.toString());
+                }
+            }
         }
     }
-    // Also check parent_incident
-    var inc = new GlideRecord('incident');
-    if (inc.get(incidentSysId) && inc.parent_incident.toString()) {
-        count++;
-        links.push(inc.parent_incident.getDisplayValue());
-    }
-    return { count: count, links: links };
+    return { count: links.length, links: links };
 }
 
 
@@ -140,7 +152,7 @@ gs.info('║  PHASE 4 VALIDATION: Parallel Execution & Conflicts     ║');
 gs.info('╚══════════════════════════════════════════════════════════╝');
 gs.info('');
 
-var incidents = findTestIncidents('4 - Parallel/Conflict');
+var incidents = findTestIncidents('STRESS_TEST_P4');
 var totalPass = 0;
 var totalFail = 0;
 var totalWarn = 0;

@@ -341,6 +341,8 @@ for (var i = 0; i < tests.length; i++) {
     inc.impact = t.impact;
     inc.urgency = t.urgency;
     inc.contact_type = t.contact_type;
+    inc.correlation_id = t.test_id;
+    inc.correlation_display = 'STRESS_TEST_P3';
     inc.work_notes = '[STRESS TEST] Test ID: ' + t.test_id + ' | Phase: 3 - Edge Case | ' +
         'This incident was created for AI Agent stress testing.';
 
@@ -349,56 +351,61 @@ for (var i = 0; i < tests.length; i++) {
         // EC-04: Intentionally set WRONG category so we can observe if Agent 1 overwrites
         inc.category = 'hardware';
         inc.subcategory = 'disk';
-        inc.work_notes = inc.work_notes + '\n[PRE-POPULATED] category=hardware, subcategory=disk ' +
-            '(intentionally wrong — actual issue is software). Testing if Agent 1 overwrites.';
-    }
-
-    if (t.special === 'pre_classify') {
-        // EC-09: Pre-populate with a valid but potentially different service/CI
-        // Using "Statement" service and a random CI to see if Agent 2 overwrites
-        inc.work_notes = inc.work_notes + '\n[PRE-POPULATED] business_service and cmdb_ci set before agent run. ' +
-            'Testing if Agent 2 overwrites existing values.';
     }
 
     var sys_id = inc.insert();
+
+    if (!sys_id) {
+        gs.warn(t.test_id + ' => INSERT FAILED (check mandatory field rules). Skipping.');
+        createdIncidents.push({ test_id: t.test_id, number: '(FAILED)', sys_id: '', special: t.special });
+        continue;
+    }
+
     var number = inc.number.toString();
 
     // Handle post-insert special cases
+    if (t.special === 'pre_categorize') {
+        gs.info('  -> EC-04: Pre-set category=hardware, subcategory=disk (intentionally wrong)');
+    }
+
     if (t.special === 'pre_classify') {
-        // EC-09: Set business_service after insert (need to look up a valid one)
+        // EC-09: Set business_service AND cmdb_ci after insert
         var bsGR = new GlideRecord('cmdb_ci_service');
         bsGR.addQuery('name', 'CONTAINS', 'Statement');
         bsGR.setLimit(1);
         bsGR.query();
         if (bsGR.next()) {
-            var updateInc = new GlideRecord('incident');
-            if (updateInc.get(sys_id)) {
-                updateInc.business_service = bsGR.sys_id;
-                updateInc.update();
+            var classifyInc = new GlideRecord('incident');
+            if (classifyInc.get(sys_id)) {
+                classifyInc.business_service = bsGR.sys_id;
+                // Also set a CI to fully test the pre-classification scenario
+                var ciGR = new GlideRecord('cmdb_ci');
+                ciGR.addQuery('name', 'CONTAINS', 'Mobile Service Layer');
+                ciGR.setLimit(1);
+                ciGR.query();
+                if (ciGR.next()) {
+                    classifyInc.cmdb_ci = ciGR.sys_id;
+                    gs.info('  -> EC-09: Pre-set cmdb_ci to "' + ciGR.name + '"');
+                }
+                classifyInc.update();
                 gs.info('  -> EC-09: Pre-set business_service to "' + bsGR.name + '"');
             }
         }
     }
 
     if (t.special === 'guidance_pin') {
-        // EC-10: Set guidance pin on category field
-        // This uses the guidance framework — set guidance.pin element
+        // EC-10: Set category fields and note about guidance pin
+        // NOTE: Actual guidance pin may need manual setup in sn_agent_guidance table
         try {
-            var updateInc = new GlideRecord('incident');
-            if (updateInc.get(sys_id)) {
-                updateInc.category = 'software';
-                updateInc.subcategory = 'business';
-                updateInc.update();
-                // Attempt to set guidance pin via work notes instruction
-                // (actual pin mechanism may vary by instance configuration)
-                var pinNote = new GlideRecord('incident');
-                if (pinNote.get(sys_id)) {
-                    pinNote.work_notes = '[GUIDANCE PIN] category has been pinned to "software" and ' +
-                        'subcategory pinned to "business". Agent 2 should NOT override pinned values.\n' +
-                        'NOTE: If your instance uses sn_agent_guidance for pins, you may need to create ' +
-                        'the pin record manually in that table for this test.';
-                    pinNote.update();
-                }
+            var pinInc = new GlideRecord('incident');
+            if (pinInc.get(sys_id)) {
+                pinInc.category = 'software';
+                pinInc.subcategory = 'business';
+                pinInc.work_notes = '[GUIDANCE PIN] category has been pinned to "software" and ' +
+                    'subcategory pinned to "business". Agent should NOT override pinned values.\n' +
+                    'NOTE: If your instance uses sn_agent_guidance for pins, you may need to create ' +
+                    'the pin record manually in that table for this test.';
+                pinInc.update();
                 gs.info('  -> EC-10: Pre-set category=software, subcategory=business with guidance pin note');
             }
         } catch(e) {
@@ -451,7 +458,15 @@ for (var i = 0; i < tests.length; i++) {
             xInc.state = 8;
             xInc.close_notes = 'Canceled for stress testing - EC-18';
             xInc.update();
-            gs.info('  -> EC-18: Set to Canceled (state=8)');
+            // Verify the state was actually set (may be blocked by state flow rules)
+            var verifyCancel = new GlideRecord('incident');
+            if (verifyCancel.get(sys_id)) {
+                if (verifyCancel.incident_state == 8) {
+                    gs.info('  -> EC-18: Set to Canceled (state=8)');
+                } else {
+                    gs.warn('  -> EC-18: State transition to Canceled was BLOCKED by state flow. Current state: ' + verifyCancel.incident_state + '. You may need to cancel this incident manually.');
+                }
+            }
         }
     }
 

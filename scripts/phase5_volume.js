@@ -219,9 +219,16 @@ for (var i = 0; i < tests.length; i++) {
     inc.impact = randomImpact();
     inc.urgency = randomImpact();
     inc.contact_type = randomContact();
+    inc.correlation_id = t.test_id;
+    inc.correlation_display = 'STRESS_TEST_P5';
     inc.work_notes = '[STRESS TEST] Test ID: ' + t.test_id + ' | Phase: 5 - Volume | ' +
         'This incident was created for AI Agent volume/performance testing.';
     var sys_id = inc.insert();
+
+    if (!sys_id) {
+        gs.warn(t.test_id + ' => INSERT FAILED (check mandatory field rules). Skipping.');
+        continue;
+    }
 
     var number = inc.number.toString();
     createdIncidents.push({ test_id: t.test_id, number: number, sys_id: sys_id });

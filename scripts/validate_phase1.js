@@ -70,18 +70,15 @@ var EXPECTED = {
 // HELPER FUNCTIONS
 // ============================================================
 
-function findTestIncidents(phase) {
+function findTestIncidents(correlationDisplay) {
     var incidents = {};
     var gr = new GlideRecord('incident');
-    gr.addQuery('work_notes', 'CONTAINS', '[STRESS TEST]');
-    gr.addQuery('work_notes', 'CONTAINS', 'Phase: ' + phase);
+    gr.addQuery('correlation_display', correlationDisplay);
     gr.query();
     while (gr.next()) {
-        // Extract test_id from work notes
-        var wn = gr.work_notes.getJournalEntry(1);
-        var match = /Test ID:\s*(\S+)/.exec(wn);
-        if (match) {
-            incidents[match[1]] = {
+        var testId = gr.correlation_id.toString();
+        if (testId) {
+            incidents[testId] = {
                 sys_id: gr.sys_id.toString(),
                 number: gr.number.toString(),
                 category: gr.category.toString(),
@@ -124,7 +121,7 @@ function getAgentExecutions(incidentSysId) {
 }
 
 function getMILink(incidentSysId) {
-    // Check for major incident link via parent_incident or related records
+    // Check for major incident link via parent_incident
     var inc = new GlideRecord('incident');
     if (inc.get(incidentSysId)) {
         if (inc.parent_incident && inc.parent_incident.toString()) {
@@ -139,20 +136,22 @@ function getMILink(incidentSysId) {
         }
     }
 
-    // Also check task_relationship table for MI links
+    // Check task_rel_task for any relationship where the parent is a Major Incident
     var rel = new GlideRecord('task_rel_task');
     if (rel.isValid()) {
         rel.addQuery('child', incidentSysId);
-        rel.addQuery('type.name', 'CONTAINS', 'Major');
         rel.query();
-        if (rel.next()) {
+        while (rel.next()) {
             var parentTask = new GlideRecord('incident');
             if (parentTask.get(rel.parent.toString())) {
-                return {
-                    linked: true,
-                    mi_number: parentTask.number.toString(),
-                    mi_short_desc: parentTask.short_description.toString()
-                };
+                // Verify parent is actually a Major Incident
+                if (parentTask.major_incident_state && parentTask.major_incident_state.toString()) {
+                    return {
+                        linked: true,
+                        mi_number: parentTask.number.toString(),
+                        mi_short_desc: parentTask.short_description.toString()
+                    };
+                }
             }
         }
     }
@@ -194,7 +193,7 @@ gs.info('║  PHASE 1 VALIDATION: Happy Path Results                 ║');
 gs.info('╚══════════════════════════════════════════════════════════╝');
 gs.info('');
 
-var incidents = findTestIncidents('1 - Happy Path');
+var incidents = findTestIncidents('STRESS_TEST_P1');
 var testIds = Object.keys(EXPECTED);
 var totalPass = 0;
 var totalFail = 0;
