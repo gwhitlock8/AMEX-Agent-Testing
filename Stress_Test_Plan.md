@@ -151,7 +151,7 @@ For each test run, plan to check:
 
 ---
 
-## Phase 1: Happy Path Tests (5-8 incidents)
+## Phase 1: Happy Path Tests (6 incidents)
 
 **Goal:** Establish baseline — confirm all 3 agents work correctly on clean, unambiguous incidents.
 
@@ -175,7 +175,7 @@ Create or select incidents where the "right answer" is obvious. Use real CIs and
 
 ---
 
-## Phase 2: Accuracy Matrix Tests (10-15 incidents)
+## Phase 2: Accuracy Matrix Tests (27 incidents)
 
 **Goal:** Systematically test across different incident types to validate categorization and classification breadth.
 
@@ -226,7 +226,7 @@ Use these real MI/Problem pairs from the instance to design matching test incide
 
 ---
 
-## Phase 3: Edge Case Tests (10-15 incidents)
+## Phase 3: Edge Case Tests (21 incidents)
 
 **Goal:** Test boundary conditions, ambiguity, and failure handling.
 
@@ -286,16 +286,17 @@ Use these real MI/Problem pairs from the instance to design matching test incide
 
 ---
 
-## Phase 5: Volume / Performance Tests (20-50 incidents)
+## Phase 5: Volume / Performance Tests (30 incidents)
 
 **Goal:** Test throughput, consistency at scale, and response times.
 
 ### 5.1 — Sequential Volume Run
-Run 20-50 incidents one after another through the workflow manually. For each:
+Run 30 incidents (VL-01 through VL-30) one after another through the workflow. For each:
 - Record start time (when you trigger) and end time (when last agent completes)
 - Track whether all 3 agents completed
-- Spot-check accuracy on every 5th incident (detailed review)
+- Spot-check accuracy on every 5th incident: **VL-05, VL-10, VL-15, VL-20, VL-25, VL-30** (detailed review)
 - Flag any incidents where agents timed out or errored
+- Run `validate_phase5.js` after all 30 complete for automated aggregate metrics
 
 ### 5.2 — Performance Metrics to Track
 
@@ -338,19 +339,72 @@ For any issues found and fixed, rerun the specific failing test cases to confirm
 
 ---
 
+## Scripts & Automation
+
+All scripts are in the `scripts/` directory and run in **ServiceNow > System Definition > Scripts - Background**.
+
+### Incident Creation Scripts
+
+| Script | Phase | Incidents | Description |
+|--------|-------|-----------|-------------|
+| `phase1_happy_path.js` | 1 | 6 | Clear, unambiguous incidents (HP-01 to HP-06) |
+| `phase2_accuracy_matrix.js` | 2 | 27 | 11 category + 10 service offering + 6 MI/Problem (AC/SO/MP) |
+| `phase3_edge_cases.js` | 3 | 21 | Vague, multi-lang, pre-populated, resolved/closed/canceled, empty (EC-01 to EC-20) |
+| `phase4_parallel_conflict.js` | 4 | 5 | Race conditions, double-trigger, manual-edit-during-run (PX-01 to PX-05) |
+| `phase5_volume.js` | 5 | 30 | Randomized mix across all categories (VL-01 to VL-30) |
+| **Total** | | **89** | |
+
+- All scripts use `caller_id = 28745d9d47e4c3d0c0969fd8036d4305`
+- Contact types are weighted random (50% chat, 20% phone, 15% email, 10% self-service, 5% walk-in)
+- Each incident gets a `[STRESS TEST]` work note tag with test ID and phase for automated discovery
+- Category, subcategory, business_service, service_offering, and cmdb_ci are left **blank** for the agentic workflow to populate (except EC-04, EC-09, EC-10 which test pre-populated fields)
+- EC-16/17/18 are set to resolved/closed/canceled state after creation
+- EC-19 is manual only (use fake INC number "INC9999999")
+
+### Validation Scripts
+
+| Script | Phase | What it validates |
+|--------|-------|-------------------|
+| `validate_phase1.js` | 1 | Exact category/subcategory match, MI/Problem link to specific INC/PRB numbers, all 3 agent work notes |
+| `validate_phase2.js` | 2 | Category accuracy (11 types), service→offering channel matching, MI/Problem pair accuracy |
+| `validate_phase3.js` | 3 | Null results for vague inputs, pre-populated field preservation, non-English language detection, state-based refusal |
+| `validate_phase4.js` | 4 | Work note completeness, Agent 1↔Agent 2 field overwrite detection, duplicate link detection, concurrent persistence |
+| `validate_phase5.js` | 5 | Aggregate completion rate, field population %, execution time (avg/P95/max), spot-check flags every 5th incident |
+
+**Validation features:**
+- Auto-discovers test incidents via `[STRESS TEST]` work note tags — no need to manually enter INC numbers
+- Checks both `sn_agent_execution` and `sn_aia_execution` tables for agent execution logs
+- Checks MI links via `parent_incident` field and `task_rel_task` relationship table
+- Output uses `✅ PASS`, `❌ FAIL`, `⚠️ WARN`, `👁️ OBSERVE` verdicts
+- Summary box at end with totals and pass rate per phase
+
+### Execution Workflow
+
+For each phase, run 3 steps:
+
+```
+Step 1: Run creation script     →  scripts/phaseN_*.js       (Scripts - Background)
+Step 2: Trigger workflow         →  Now Assist panel on each INC  (manual)
+Step 3: Run validation script   →  scripts/validate_phaseN.js    (Scripts - Background)
+```
+
+**Wait for all 3 agents to complete on every incident before running the validator.** Check work notes on the last incident in the batch — when all 3 agents have posted, the batch is ready to validate.
+
+---
+
 ## Execution Order Summary
 
-| Step | What | Estimated Effort |
-|------|------|------------------|
-| Phase 0 | Setup tracking, document baseline data, confirm trigger mechanism | 1-2 hours |
-| Phase 1 | Happy Path — 5-8 incidents | 1-2 hours |
-| Phase 2 | Accuracy Matrix — 10-15 incidents | 2-3 hours |
-| Phase 3 | Edge Cases — 15-20 incidents | 3-4 hours |
-| Phase 4 | Parallel/Conflict tests — 5 incidents | 1 hour |
-| Phase 5 | Volume run — 20-50 incidents | 2-4 hours |
-| Phase 6 | Analysis and retesting | 2-4 hours |
+| Step | What | Create Script | Validate Script | Incidents |
+|------|------|--------------|-----------------|-----------|
+| Phase 0 | Setup: tracking sheet, baseline data, confirm trigger | N/A | N/A | 0 |
+| Phase 1 | Happy Path | `phase1_happy_path.js` | `validate_phase1.js` | 6 |
+| Phase 2 | Accuracy Matrix | `phase2_accuracy_matrix.js` | `validate_phase2.js` | 27 |
+| Phase 3 | Edge Cases | `phase3_edge_cases.js` | `validate_phase3.js` | 21 |
+| Phase 4 | Parallel/Conflict | `phase4_parallel_conflict.js` | `validate_phase4.js` | 5 |
+| Phase 5 | Volume/Performance | `phase5_volume.js` | `validate_phase5.js` | 30 |
+| Phase 6 | Analysis & retesting | N/A | Re-run validators | 0 |
 
-**Total: ~10-20 hours of manual testing across 55-100 test incidents**
+**Total: 89 test incidents with automated validation**
 
 ---
 
